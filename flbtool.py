@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 import argparse
 import glob
@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import struct
+from base64 import b64encode, b64decode
 
 from logging import debug, info, warning
 
@@ -29,6 +30,9 @@ class JsonSerializable(object):
     def dumper(obj):
         if "serialize" in dir(obj):
             return obj.serialize()
+
+        if isinstance(obj, bytes):
+            return dict(__classname__='bytes', data=b64encode(obj).decode('utf-8'))
 
         data = obj.__dict__
         data['__classname__'] = obj.__class__.__name__
@@ -54,7 +58,7 @@ class FLBHeader:
         (self.magic, self.header_length, self.unknown1, self.data_length, self.delimiter,
             self.description, self.version1, self.version2, self.version3) = struct.unpack(FLBHeader.HEADERFORMAT, firmware[0:FLBHeader.HEADERSIZE])
 
-        self.description = self.description.replace("\x00", '')
+        self.description = self.description.replace(b"\x00", b'')
         self.logInfo()
         return FLBHeader.HEADERSIZE
 
@@ -67,8 +71,8 @@ class FLBHeader:
         info('Header Length: %i Data Length: %i' % (self.header_length, self.data_length))
 
     def writeToFLB(self, output_file):
-        output_file.write(struct.pack(FLBHeader.HEADERFORMAT, self.magic.encode('ascii'), self.header_length, self.unknown1, self.data_length, self.delimiter,
-            self.description.encode('ascii'), self.version1, self.version2, self.version3))
+        output_file.write(struct.pack(FLBHeader.HEADERFORMAT, self.magic, self.header_length, self.unknown1, self.data_length, self.delimiter,
+            self.description, self.version1, self.version2, self.version3))
 
 class PCIDetails:
     HEADERFORMAT = (
@@ -121,7 +125,7 @@ class PCIDetails:
             info('FLB type: 0x%x (UNKNOWN)' % self.flb_type)
 
     def writeToFLB(self, output_file):
-        output_file.write(struct.pack(PCIDetails.HEADERFORMAT, self.flb_type, self.unknown.encode('ascii')))
+        output_file.write(struct.pack(PCIDetails.HEADERFORMAT, self.flb_type, self.unknown))
 
 
 class PCIDeviceList:
@@ -268,7 +272,7 @@ def extract_firmware(args):
 
     inputdata = args.input.read()
 
-    if inputdata[0:4] != "FLB3":
+    if inputdata[0:4] != b"FLB3":
         warning('File does not appear to be FLB3, continuing anyway... this is not likely going to work')
 
     debug("Reading %i bytes..." % len(inputdata))
@@ -293,6 +297,8 @@ def object_hook(curobject):
     if '__classname__' not in curobject:
         return curobject
 
+    if curobject['__classname__'] == 'bytes':
+        return b64decode(curobject['data'])
     if curobject['__classname__'] == 'PCIDetails':
         cur = PCIDetails()
         cur.deserialize(curobject)
